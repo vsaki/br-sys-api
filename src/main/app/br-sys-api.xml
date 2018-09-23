@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <http:listener-config name="br-sys-api-httpListenerConfig" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <apikit:config name="br-sys-api-config" raml="br-sys-api.raml" consoleEnabled="false" doc:name="Router"/>
+    <flow name="br-sys-api-main">
+        <http:listener config-ref="br-sys-api-httpListenerConfig" path="/api/*" doc:name="HTTP"/>
+        <apikit:router config-ref="br-sys-api-config" doc:name="APIkit Router"/>
+        <exception-strategy ref="br-sys-api-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="br-sys-api-console">
+        <http:listener config-ref="br-sys-api-httpListenerConfig" path="/console/*" doc:name="HTTP"/>
+        <apikit:console config-ref="br-sys-api-config" doc:name="APIkit Console"/>
+    </flow>
+    <flow name="get:/brget:br-sys-api-config">
+        <set-payload value="{
+    &quot;message&quot;: {
+        &quot;status&quot;: &quot;success&quot;,
+        &quot;errorMess&quot;: &quot;&quot;,
+        &quot;errorCode&quot;: &quot;&quot;
+    }
+}" doc:name="Set Payload"/>
+
+    </flow>
+    <flow name="post:/brget:application/json:br-sys-api-config">
+        <until-successful maxRetries="2" millisBetweenRetries="10000" synchronous="true" doc:name="Until Successful">
+            <http:request config-ref="HTTP_Request_Configuration" path="/order" method="POST" sendBodyMode="ALWAYS" doc:name="HTTP">
+                <http:success-status-code-validator values="404,200"/>
+            </http:request>
+        </until-successful>
+        <logger message="#[message.inboundProperties.'http.status']" level="INFO" doc:name="Logger"/>
+        <choice doc:name="Choice">
+            <when expression="message.inboundProperties.'http.status'==200">
+                <logger message="---------------------------------it is success flow" level="INFO" doc:name="Logger"/>
+            </when>
+            <otherwise>
+                <scripting:component doc:name="Groovy">
+                    <scripting:script engine="Groovy"><![CDATA[throw new com.br.exception.BusinessException('business error')]]></scripting:script>
+                </scripting:component>
+            </otherwise>
+        </choice>
+        <choice-exception-strategy doc:name="Choice Exception Strategy">
+            <catch-exception-strategy doc:name="Catch Exception Strategy" when="#[exception.causeMatches('java.net.ConnectException')]">
+                <set-property propertyName="http.status" value="502" doc:name="Property"/>
+                <set-payload value="Error connecting to BR HTTP service" doc:name="Set Payload"/>
+            </catch-exception-strategy>
+            <catch-exception-strategy doc:name="Catch Exception Strategy" when="#[exception.causeMatches('org.mule.module.http.internal.request.ResponseValidatorException')]">
+                <logger message="buisness error----------#[message.inboundProperties.'http.status']" level="INFO" doc:name="Logger"/>
+                <set-payload value="Technical error !! from BR" doc:name="Set Payload"/>
+            </catch-exception-strategy>
+            <catch-exception-strategy when="#[exception.causeMatches('com.br.exception.BusinessException')]" doc:name="Catch Exception Strategy">
+                <set-property propertyName="http.status" value="#[message.inboundProperties.'http.status']" doc:name="Property"/>
+                <set-payload value="Business Exception from grovie" doc:name="Set Payload"/>
+            </catch-exception-strategy>
+        </choice-exception-strategy>
+
+    </flow>
+    <apikit:mapping-exception-strategy name="br-sys-api-apiKitGlobalExceptionMapping">
+
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload"/>
+
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>
